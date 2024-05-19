@@ -85,6 +85,7 @@ func (h *Handlers) CreateUserTransferHandler(ctx *fiber.Ctx) error {
 	}
 
 	h.Transaction.UserToAccountTransfer(ctx, params, time.Now())
+
 	return ctx.JSON(fiber.Map{"message": "Transfer to account done successfully"})
 }
 func (h *Handlers) CreateAccountToAccountTransferHandler(ctx *fiber.Ctx) error {
@@ -100,4 +101,16 @@ func (h *Handlers) CreateAccountToAccountTransferHandler(ctx *fiber.Ctx) error {
 
 	h.Transaction.CreateAccountToAccountTransfer(ctx, params, time.Now())
 	return ctx.JSON(fiber.Map{"message": "Transfer to account done successfully"})
+}
+
+func (h *Handlers) VerifyTransaction(ctx *fiber.Ctx) error {
+	transactionId := ctx.Params("transactionId")
+
+	_, err := h.Transaction.VerifyTransaction(ctx, transactionId, time.Now())
+	if err != nil {
+		return ctx.Status(500).JSON(fiber.Map{"message": err.Error()})
+	}
+
+	return ctx.JSON(fiber.Map{"message": "Transaction verified successfully"})
+
 }

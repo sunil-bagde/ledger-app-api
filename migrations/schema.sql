@@ -29,7 +29,7 @@ CREATE TABLE accounts (
 -- Version: 1.3
 -- Description: Create table transactions
 CREATE TABLE transactions (
-	id            UUID default gen_random_uuid() NOT NULL,
+	id UUID DEFAULT gen_random_uuid () NOT NULL,
 	from_account_id UUID,
 	to_account_id UUID,
 	account_id UUID,
@@ -40,7 +40,9 @@ CREATE TABLE transactions (
 	name VARCHAR(255),
 	slug VARCHAR(255),
 	TYPE VARCHAR(100),
-    transaction_type VARCHAR(100) NULL DEFAULT '""',
+	HASH VARCHAR(70) NOT NULL DEFAULT '""',
+	previous_hash VARCHAR(70) NOT NULL DEFAULT '""',
+	transaction_type VARCHAR(100) NULL DEFAULT '""',
 	date_created TIMESTAMP,
 	date_updated TIMESTAMP,
 	PRIMARY KEY (id)

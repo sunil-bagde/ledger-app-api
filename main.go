@@ -77,13 +77,15 @@ func main() {
 	userHandler := userHandler.NewHandlers(ugh.User)
 	accountHandler := account.NewHandlers(accCore.Account)
 	// API
-	app.Get("/", handler.HomeHandler)
-	app.Post("/api/users", userHandler.CreateUserHandler)
-	app.Post("/api/accounts", accountHandler.CreateAccountHandler)
-	app.Post("/api/deposit", tHandler.CreateDepositHandler)
-	app.Post("/api/withdraw", tHandler.CreateWithdrawHandler)
-	app.Post("/api/transfer/account-to-user", tHandler.CreateUserTransferHandler)
-	app.Post("/api/transfer/account-to-account", tHandler.CreateAccountToAccountTransferHandler)
+	api := app.Group("/api")
+	api.Get("/", handler.HomeHandler)
+	api.Post("/users", userHandler.CreateUserHandler)
+	api.Post("/accounts", accountHandler.CreateAccountHandler)
+	api.Post("/deposit", tHandler.CreateDepositHandler)
+	api.Post("/withdraw", tHandler.CreateWithdrawHandler)
+	api.Post("/transfer/account-to-user", tHandler.CreateUserTransferHandler)
+	api.Post("/transfer/account-to-account", tHandler.CreateAccountToAccountTransferHandler)
+	api.Get("/transfer/verify/:transactionId", tHandler.VerifyTransaction)
 
 	// Start the server on port 3000
 	app.Listen(":3000") // Remove the second argument from the app.Listen function call

@@ -1,6 +1,9 @@
 package transaction
 
 import (
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"time"
@@ -67,6 +70,7 @@ func (s *Store) Deposit(ctx *fiber.Ctx, newAcc NewDeposit, now time.Time) (Accou
 }
 func (s *Store) Withdraw(ctx *fiber.Ctx, newAcc NewWithdraw, now time.Time) (AccountActivity, error) {
 	// add validation logic here  61-62
+
 	acc, err := s.QueryByID(ctx, newAcc.AccountId)
 	if err != nil {
 		return AccountActivity{}, fmt.Errorf("querying account: %w", err)
@@ -136,6 +140,27 @@ func (s Store) Update(ctx *fiber.Ctx, accountId string, up account.UpdateAccount
 	}
 
 	return nil
+}
+func (s *Store) QueryLastTrsactionByUserId(ctx *fiber.Ctx, userId string) (NewTransfer, error) {
+
+	data := struct {
+		UserId string `db:"user_id"`
+	}{
+		UserId: userId,
+	}
+	const q = `SELECT * FROM transactions WHERE id=:`
+
+	var prd NewTransfer
+
+	if err := database.NamedQueryStruct(ctx.Context(), s.log, s.db, q, data, &prd); err != nil {
+		if err == database.ErrNotFound {
+			return NewTransfer{}, database.ErrNotFound
+		}
+
+		return NewTransfer{}, fmt.Errorf("selecting product accountId[%q]: %w", userId, err)
+	}
+
+	return prd, nil
 }
 
 // ctx *fiber.Ctx, newAcc NewDeposit, now time.Time
@@ -222,16 +247,40 @@ func (s *Store) AccountToUserTransfer(ctx *fiber.Ctx, nt NewTransfer, now time.T
 	return AccountActivity{}, nil
 }
 
+func createSenderTransactionHash(t NewTransfer) string {
+	data := fmt.Sprintf("%.2f%s%s%s%s", t.Amount, t.UserId, t.AccountId, t.Type, t.PreviousHash)
+	hash := sha256.New()
+	hash.Write([]byte(data))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+func createReceiverTransactionHash(t NewTransfer) string {
+
+	data := fmt.Sprintf("%.2f%s%s%s%s", t.Amount, t.ToUser, t.ToAccount, t.Type, t.PreviousHash)
+
+	hash := sha256.New()
+	hash.Write([]byte(data))
+	return hex.EncodeToString(hash.Sum(nil))
+}
+
 // HERE
 func (s *Store) UserToAccountTransfer(ctx *fiber.Ctx, nt NewTransfer, now time.Time) (AccountActivity, error) {
+	tx, err := s.db.Beginx()
+	if err != nil {
+
+		return AccountActivity{}, err
+	}
 	fromAcc, fromErr := s.QueryByID(ctx, nt.AccountId)
+
 	if fromErr != nil {
+
 		return AccountActivity{}, fmt.Errorf("querying from account: %w", fromErr)
 	}
 	toAcc, toErr := s.QueryByID(ctx, nt.ToAccount)
 	if toErr != nil {
+
 		return AccountActivity{}, fmt.Errorf("querying to account: %w", toErr)
 	}
+
 	fromAccBalance := fromAcc.AvailableAmount - nt.Amount
 	// from update
 	s.Update(ctx, nt.AccountId, account.UpdateAccount{
@@ -245,6 +294,26 @@ func (s *Store) UserToAccountTransfer(ctx *fiber.Ctx, nt NewTransfer, now time.T
 		DateUpdated:     now.Format(time.RFC3339),
 	}, now)
 	date := now.Format(time.RFC3339)
+	type Transaction1 struct {
+		PreviousHash string `db:"previous_hash"`
+		Hash         string `db:"hash"`
+	}
+	var lastTransaction Transaction1
+	errLastTx := tx.Get(&lastTransaction, "SELECT hash, previous_hash FROM transactions WHERE date_created = (SELECT MAX(date_created) FROM transactions) FOR UPDATE")
+
+	if errLastTx != nil && errLastTx != sql.ErrNoRows {
+		_ = tx.Rollback()
+
+		return AccountActivity{}, errLastTx
+	}
+	if err != sql.ErrNoRows {
+
+		lastTransaction.PreviousHash = lastTransaction.Hash
+	} else {
+		lastTransaction.PreviousHash = ""
+	}
+	nt.PreviousHash = lastTransaction.PreviousHash
+	fromHash := createSenderTransactionHash(nt)
 
 	frmAccount := FromAccountToTransfer{
 		AccountId:       nt.AccountId,
@@ -252,31 +321,45 @@ func (s *Store) UserToAccountTransfer(ctx *fiber.Ctx, nt NewTransfer, now time.T
 		Type:            nt.Type,
 		DateCreated:     &date,
 		DateUpdated:     &date,
+		Hash:            fromHash,
+		PreviousHash:    lastTransaction.Hash,
 		TransactionType: constant.DEBIT,
 		UserId:          nt.UserId,
 	}
-	if err := database.NamedExecContext(ctx.Context(), s.log, s.db, `INSERT INTO "public"."transactions" ("account_id", "user_id", "amount", "type", "transaction_type","date_created", "date_updated")
-	VALUES (:account_id, :user_id, :amount, :type, :transaction_type, :date_created, :date_updated)`, frmAccount); err != nil {
+	if err := database.NamedExecContext(ctx.Context(), s.log, s.db, `INSERT INTO "public"."transactions" ("account_id", "user_id", "amount", "type", "transaction_type", "hash",
+	"previous_hash","date_created", "date_updated")
+	VALUES (:account_id, :user_id, :amount, :type, :transaction_type,:hash, :previous_hash, :date_created, :date_updated)`, frmAccount); err != nil {
+
 		return AccountActivity{}, fmt.Errorf("inserting transfer account to user: %w", err)
 	}
-
+	nt.PreviousHash = fromHash
+	toHash := createReceiverTransactionHash(nt)
 	toAccount := ToAccountToTransfer{
 		ToUser:          nt.ToUser,
 		ToAccount:       nt.ToAccount,
 		Amount:          nt.Amount,
 		Type:            nt.Type,
 		TransactionType: constant.CREDIT,
+		Hash:            toHash,
+		PreviousHash:    fromHash,
 		DateCreated:     &date,
 		DateUpdated:     &date,
 	}
 
-	toInsertQuery := `INSERT INTO "public"."transactions" ("to_user_id", "to_account_id", "amount", "type", "transaction_type", "date_created", "date_updated")
-	VALUES (:to_user, :to_account, :amount, :type, :transaction_type, :date_created, :date_updated)`
+	toInsertQuery := `INSERT INTO "public"."transactions" ("to_user_id", "to_account_id", "amount", "type", "transaction_type", "hash",
+	"previous_hash", "date_created", "date_updated")
+	VALUES (:to_user, :to_account, :amount, :type, :transaction_type, :hash, :previous_hash,:date_created, :date_updated)`
 
 	if err := database.NamedExecContext(ctx.Context(), s.log, s.db, toInsertQuery, toAccount); err != nil {
-		return AccountActivity{}, fmt.Errorf("inserting transfer account to user: %w", err)
-	}
 
+		return AccountActivity{}, err
+	}
+	// Commit the transaction
+	err = tx.Commit()
+	if err != nil {
+
+		return AccountActivity{}, err
+	}
 	return AccountActivity{}, nil
 }
 
@@ -336,4 +419,82 @@ func (s *Store) AccountToAccountTransfer(ctx *fiber.Ctx, nt AccountToAccountTran
 	}
 
 	return AccountActivity{}, nil
+}
+func (s *Store) VerifyTransaction(ctx *fiber.Ctx, transactionId string, now time.Time) (AccountActivity, error) {
+	data := struct {
+		TransactionId string `db:"transaction_id"`
+	}{
+		TransactionId: transactionId,
+	}
+	const q = `SELECT to_account_id, to_user_id, account_id, user_id, amount, type, hash, previous_hash FROM transactions WHERE id = :transaction_id`
+
+	var createHash CreateHash
+
+	if err := database.NamedQueryStruct(ctx.Context(), s.log, s.db, q, data, &createHash); err != nil {
+		if err == database.ErrNotFound {
+			return AccountActivity{}, database.ErrNotFound
+		}
+		return AccountActivity{}, fmt.Errorf("selecting product accountId[%q]: %w", transactionId, err)
+	}
+
+	var prevHash string
+	var acId string
+	var uId string
+	var toAc string
+	var toUser string
+
+	if createHash.PreviousHash.Valid {
+		prevHash = createHash.PreviousHash.String
+	}
+	if createHash.AccountId.Valid {
+		acId = createHash.AccountId.String
+	}
+	if createHash.ToAccount.Valid {
+		toAc = createHash.ToAccount.String
+	}
+	if createHash.UserId.Valid {
+		uId = createHash.UserId.String
+	}
+	if createHash.ToUser.Valid {
+		toUser = createHash.ToUser.String
+	}
+
+	var t = NewTransfer{
+		Amount:       createHash.Amount,
+		UserId:       uId,
+		AccountId:    acId,
+		Type:         createHash.Type,
+		ToAccount:    toAc,
+		PreviousHash: prevHash,
+	}
+	t2 := NewTransfer{
+		Amount:       createHash.Amount,
+		ToUser:       toUser,
+		Type:         createHash.Type,
+		ToAccount:    toAc,
+		PreviousHash: prevHash,
+	}
+
+	var isValid bool = false
+
+	fmt.Println(createHash.Hash, " ", createReceiverTransactionHash(t2))
+
+	if createHash.Hash == createSenderTransactionHash(t) {
+		isValid = true
+	}
+	fmt.Println(isValid)
+	if createHash.Hash == createReceiverTransactionHash(t2) {
+		isValid = true
+	}
+	fmt.Println(isValid)
+	if !isValid {
+		return AccountActivity{}, errors.New("transaction is not valid")
+	}
+	return AccountActivity{
+		AccountId:       acId,
+		Amount:          createHash.Amount,
+		Type:            createHash.Type,
+		UserId:          toAc,
+		TransactionType: constant.CREDIT,
+	}, nil
 }

@@ -1,5 +1,7 @@
 package transaction
 
+import "database/sql"
+
 /*
 	from_account_id
 
@@ -22,10 +24,13 @@ type Deposit struct {
 }
 type AccountActivity struct {
 	AccountId       string  `db:"account_id" json:"account_id"`
+	ToAccount       string  `db:"to_account_id" json:"to_account_id"`
 	Amount          float64 `db:"amount" json:"amount"`
 	Type            string  `db:"type" json:"type"`
 	TransactionType string  `db:"transaction_type" json:"transaction_type"`
 	UserId          string  `db:"user_id" json:"user_id"`
+	Hash            string  `db:"hash" json:"hash"`
+	PreviousHash    string  `db:"previous_hash" json:"previous_hash"`
 	DateCreated     string  `db:"date_created" json:"date_created"`
 	DateUpdated     string  `db:"date_updated" json:"date_updated"`
 }
@@ -50,8 +55,10 @@ type NewTransfer struct {
 	Amount          float64 `db:"amount" json:"amount"`
 	Type            string  `db:"type" json:"type"`
 	TransactionType string  `db:"transaction_type" json:"transaction_type"`
-	ToUser          string  `db:"to_user" json:"to_user"`
-	ToAccount       string  `db:"to_account" json:"to_account"`
+	ToUser          string  `db:"to_user_id" json:"to_user"`
+	ToAccount       string  `db:"to_account_id" json:"to_account"`
+	Hash            string  `db:"hash" json:"hash"`
+	PreviousHash    string  `db:"previous_hash" json:"previous_hash"`
 	DateCreated     *string `db:"date_created" json:"date_created"`
 	DateUpdated     *string `db:"date_updated" json:"date_updated"`
 }
@@ -70,10 +77,10 @@ type FromAccountToTransfer struct {
 	Amount          float64 `db:"amount" json:"amount"`
 	Type            string  `db:"type" json:"type"`
 	TransactionType string  `db:"transaction_type" json:"transaction_type"`
-	/* 	ToUser      string  `db:"to_user" json:"to_user"`
-	ToAccount   string  `db:"to_account" json:"to_account"` */
-	DateCreated *string `db:"date_created" json:"date_created"`
-	DateUpdated *string `db:"date_updated" json:"date_updated"`
+	Hash            string  `db:"hash" json:"hash"`
+	PreviousHash    string  `db:"previous_hash" json:"previous_hash"`
+	DateCreated     *string `db:"date_created" json:"date_created"`
+	DateUpdated     *string `db:"date_updated" json:"date_updated"`
 }
 
 type ToAccountToTransfer struct {
@@ -82,6 +89,8 @@ type ToAccountToTransfer struct {
 	TransactionType string  `db:"transaction_type" json:"transaction_type"`
 	ToUser          string  `db:"to_user" json:"to_user"`
 	ToAccount       string  `db:"to_account" json:"to_account"`
+	Hash            string  `db:"hash" json:"hash"`
+	PreviousHash    string  `db:"previous_hash" json:"previous_hash"`
 	DateCreated     *string `db:"date_created" json:"date_created"`
 	DateUpdated     *string `db:"date_updated" json:"date_updated"`
 }
@@ -94,4 +103,16 @@ type AccountToAccountTransfer struct {
 	ToAccount       string  `db:"to_account" json:"to_account_id"`
 	DateCreated     *string `db:"date_created" json:"date_created"`
 	DateUpdated     *string `db:"date_updated" json:"date_updated"`
+}
+
+type CreateHash struct {
+	AccountId       sql.NullString `db:"account_id" json:"account_id"`
+	ToAccount       sql.NullString `db:"to_account_id" json:"to_account_id"`
+	Amount          float64        `db:"amount" json:"amount"`
+	Type            string         `db:"type" json:"type"`
+	TransactionType string         `db:"transaction_type" json:"transaction_type"`
+	UserId          sql.NullString `db:"user_id" json:"user_id"`
+	ToUser          sql.NullString `db:"to_user_id" json:"to_user_id"`
+	Hash            string         `db:"hash" json:"hash"`
+	PreviousHash    sql.NullString `db:"previous_hash" json:"previous_hash"`
 }

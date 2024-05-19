@@ -97,3 +97,18 @@ func (c Core) CreateAccountToAccountTransfer(ctx *fiber.Ctx, nt transaction.Acco
 
 	return usr, nil
 }
+
+func (c Core) VerifyTransaction(ctx *fiber.Ctx, transactionId string, now time.Time) (transaction.AccountActivity, error) {
+
+	// PERFORM PRE BUSINESS OPERATIONS
+
+	usr, err := c.transaction.VerifyTransaction(ctx, transactionId, now)
+
+	if err != nil {
+		return transaction.AccountActivity{}, fmt.Errorf("create: %w", err)
+	}
+
+	// PERFORM POST BUSINESS OPERATIONS
+
+	return usr, nil
+}
